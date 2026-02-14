@@ -203,12 +203,12 @@ class NotionClient:
 
     # ─── 주간 분석 페이지 생성 ───
 
-    def create_weekly_analysis_page(self, parent_page_id, title, blocks):
-        """주간 분석 결과를 Notion 페이지로 생성"""
+    def create_weekly_analysis_page(self, parent_db_id, title, blocks):
+        """주간 분석 결과를 Notion DB의 새 항목으로 생성"""
         return self._request("POST", "/pages", {
-            "parent": {"page_id": parent_page_id},
+            "parent": {"database_id": parent_db_id},  # ✅ page_id가 아니라 database_id 여야 합니다!
             "properties": {
-                "title": {"title": [{"text": {"content": title}}]}
+                "이름": {"title": [{"text": {"content": title}}]}  # ✅ title이 아니라 "이름" 이어야 합니다!
             },
             "children": blocks,
         })
