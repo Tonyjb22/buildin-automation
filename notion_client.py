@@ -208,7 +208,7 @@ class NotionClient:
         return self._request("POST", "/pages", {
             "parent": {"database_id": parent_db_id},  # ✅ page_id가 아니라 database_id 여야 합니다!
             "properties": {
-                "이름": {"title": [{"text": {"content": title}}]}  # ✅ title이 아니라 "이름" 이어야 합니다!
+                "주차": {"title": [{"text": {"content": title}}]}  # ✅ title이 아니라 "이름" 이어야 합니다!
             },
             "children": blocks,
         })
