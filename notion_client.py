@@ -210,6 +210,8 @@ def create_weekly_analysis_page(self, parent_id, title, blocks):
         "properties": {
             "주차": {"title": [{"text": {"content": title}}]}
         },
+                    "children": blocks,
+        })
 
     def append_blocks(self, page_id, blocks):
         """기존 페이지에 블록 추가"""
