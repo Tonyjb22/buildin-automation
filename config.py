@@ -1,325 +1,94 @@
 """
-빌딘 컨텐츠 자동화 시스템 - Notion API 클라이언트
+빌딘 컨텐츠 자동화 시스템 - 설정 모듈
 """
-import requests
-from datetime import datetime, timedelta
-from config import Config
+import os
+from dotenv import load_dotenv
+
+load_dotenv()
 
 
-class NotionClient:
-    BASE_URL = "https://api.notion.com/v1"
-    
-    def __init__(self):
-        self.headers = {
-            "Authorization": f"Bearer {Config.NOTION_API_TOKEN}",
-            "Content-Type": "application/json",
-            "Notion-Version": "2022-06-28",
-        }
+class Config:
+    # Notion
+    NOTION_API_TOKEN = os.getenv("NOTION_API_TOKEN")
+    NOTION_CONTENT_DB_ID = os.getenv("NOTION_CONTENT_DB_ID")
+    NOTION_WEEKLY_DB_ID = os.getenv("NOTION_WEEKLY_DB_ID")
+    NOTION_ANALYSIS_PAGE_ID = os.getenv("NOTION_ANALYSIS_PAGE_ID")
 
-    def _request(self, method, endpoint, json_data=None):
-        """API 요청 래퍼"""
-        url = f"{self.BASE_URL}{endpoint}"
-        resp = requests.request(method, url, headers=self.headers, json=json_data)
-        if resp.status_code not in (200, 201):
-            print(f"❌ Notion API 오류 [{resp.status_code}]: {resp.text[:300]}")
-        resp.raise_for_status()
-        return resp.json()
+    # Instagram
+    INSTAGRAM_ACCESS_TOKEN = os.getenv("INSTAGRAM_ACCESS_TOKEN")
+    INSTAGRAM_BUSINESS_ACCOUNT_ID = os.getenv("INSTAGRAM_BUSINESS_ACCOUNT_ID")
+    INSTAGRAM_MAGAZINE_ACCOUNT_ID = os.getenv("INSTAGRAM_MAGAZINE_ACCOUNT_ID")
 
-    # ─── 컨텐츠 DB 조작 ───
+    # YouTube
+    YOUTUBE_API_KEY = os.getenv("YOUTUBE_API_KEY")
+    YOUTUBE_CHANNEL_ID = os.getenv("YOUTUBE_CHANNEL_ID")
 
-    def query_content_db(self, start_date=None, end_date=None, filter_extra=None):
-        """컨텐츠 목록 DB에서 항목 조회"""
-        filters = []
-        
-        if start_date:
-            filters.append({
-                "property": "업로드 일",
-                "date": {"on_or_after": start_date}
-            })
-        if end_date:
-            filters.append({
-                "property": "업로드 일",
-                "date": {"on_or_before": end_date}
-            })
-        if filter_extra:
-            filters.append(filter_extra)
+    # ── 평가 기준 (4단계: 최상/상/중/하) ──
+    # 평가1: 조회수 (바이럴)
+    VIEWS_BEST = int(os.getenv("VIEWS_BEST", "10000"))     # 최상: 알고리즘 노출 성공
+    VIEWS_HIGH = int(os.getenv("VIEWS_HIGH", "3000"))      # 상: 탐색 탭 노출 시작
+    VIEWS_MID = int(os.getenv("VIEWS_MID", "1000"))        # 중: 팔로워 및 해시태그 유입
+    # 하: 1000 미만 → 노출 실패
 
-        body = {"page_size": 100}
-        if len(filters) == 1:
-            body["filter"] = filters[0]
-        elif len(filters) > 1:
-            body["filter"] = {"and": filters}
+    # 평가2: 참여율 (컨텐츠 매력도)
+    ENGAGEMENT_BEST = float(os.getenv("ENGAGEMENT_BEST", "5.0"))   # 최상: 찐팬 형성
+    ENGAGEMENT_HIGH = float(os.getenv("ENGAGEMENT_HIGH", "3.0"))   # 상: 타겟 안정적 반응
+    ENGAGEMENT_MID = float(os.getenv("ENGAGEMENT_MID", "1.0"))     # 중: 나쁘지 않음
+    # 하: 1% 미만 → 이탈률 높음
 
-        all_results = []
-        has_more = True
-        start_cursor = None
-
-        while has_more:
-            if start_cursor:
-                body["start_cursor"] = start_cursor
-            
-            data = self._request("POST", f"/databases/{Config.NOTION_CONTENT_DB_ID}/query", body)
-            all_results.extend(data.get("results", []))
-            has_more = data.get("has_more", False)
-            start_cursor = data.get("next_cursor")
-
-        return all_results
-
-    def create_content_entry(self, entry_data):
-        """컨텐츠 목록 DB에 새 항목 추가"""
-        properties = {
-            "업로드 일": {"date": {"start": entry_data["upload_date"]}},
-            "경로(계정)": {"select": {"name": entry_data["route"]}},
-            "컨텐츠 링크": {"url": entry_data["content_link"]},
-            "채널/유형": {"select": {"name": entry_data["channel_type"]}},
-        }
-
-        # 숫자 필드 (있는 경우에만 추가)
-        num_fields = {
-            "조회수": "views",
-            "좋아요": "likes",
-            "저장": "saves",
-            "댓글": "comments",
-            "공유": "shares",
-        }
-        for notion_name, key in num_fields.items():
-            if key in entry_data and entry_data[key] is not None:
-                properties[notion_name] = {"number": entry_data[key]}
-
-        return self._request("POST", "/pages", {
-            "parent": {"database_id": Config.NOTION_CONTENT_DB_ID},
-            "properties": properties,
-        })
-
-    def update_content_entry(self, page_id, updates):
-        """기존 컨텐츠 항목 업데이트 (조회수, 좋아요 등 갱신)"""
-        properties = {}
-        
-        num_fields = {
-            "views": "조회수",
-            "likes": "좋아요",
-            "saves": "저장",
-            "comments": "댓글",
-            "shares": "공유",
-        }
-        for key, notion_name in num_fields.items():
-            if key in updates and updates[key] is not None:
-                properties[notion_name] = {"number": updates[key]}
-
-        # 점검현황 체크
-        if "checked" in updates:
-            properties["점검현황"] = {"checkbox": updates["checked"]}
-
-        if properties:
-            return self._request("PATCH", f"/pages/{page_id}", {"properties": properties})
-
-    def find_content_by_link(self, link):
-        """컨텐츠 링크로 기존 항목 검색"""
-        body = {
-            "filter": {
-                "property": "컨텐츠 링크",
-                "url": {"equals": link}
-            }
-        }
-        data = self._request("POST", f"/databases/{Config.NOTION_CONTENT_DB_ID}/query", body)
-        results = data.get("results", [])
-        return results[0] if results else None
-
-    # ─── 주차별 정리 DB 조작 ───
-
-    def query_weekly_db(self, week_label=None):
-        """주차별 정리 DB 조회"""
-        body = {"page_size": 100}
-        if week_label:
-            body["filter"] = {
-                "property": "주차",
-                "title": {"equals": week_label}
-            }
-        
-        data = self._request("POST", f"/databases/{Config.NOTION_WEEKLY_DB_ID}/query", body)
-        return data.get("results", [])
-
-    def create_weekly_entry(self, week_data):
-        """주차별 정리 항목 생성"""
-        properties = {
-            "주차": {"title": [{"text": {"content": week_data["week_label"]}}]},
-            "컨텐츠 수": {"number": week_data["content_count"]},
-            "조회수": {"number": week_data["total_views"]},
-            "좋아요": {"number": week_data["total_likes"]},
-            "저장": {"number": week_data["total_saves"]},
-            "댓글": {"number": week_data["total_comments"]},
-            "공유": {"number": week_data["total_shares"]},
-        }
-
-        return self._request("POST", "/pages", {
-            "parent": {"database_id": Config.NOTION_WEEKLY_DB_ID},
-            "properties": properties,
-        })
-
-    def update_weekly_entry(self, page_id, week_data):
-        """주차별 정리 항목 업데이트"""
-        properties = {}
-        field_map = {
-            "content_count": "컨텐츠 수",
-            "total_views": "조회수",
-            "total_likes": "좋아요",
-            "total_saves": "저장",
-            "total_comments": "댓글",
-            "total_shares": "공유",
-        }
-        for key, notion_name in field_map.items():
-            if key in week_data:
-                properties[notion_name] = {"number": week_data[key]}
-
-        if "checked" in week_data:
-            properties["점검현황"] = {"checkbox": week_data["checked"]}
-
-        return self._request("PATCH", f"/pages/{page_id}", {"properties": properties})
-
-    # ─── 주간 분석 페이지 생성 ───
-
-    def create_weekly_analysis_page(self, parent_page_id, title, blocks):
-        """주간 분석 결과를 Notion 페이지로 생성"""
-        return self._request("POST", "/pages", {
-            "parent": {"page_id": parent_page_id},
-            "properties": {
-                "title": {"title": [{"text": {"content": title}}]}
-            },
-            "children": blocks,
-        })
-
-    def append_blocks(self, page_id, blocks):
-        """기존 페이지에 블록 추가"""
-        return self._request("PATCH", f"/blocks/{page_id}/children", {
-            "children": blocks,
-        })
-
-    # ─── Notion 블록 헬퍼 ───
-
-    @staticmethod
-    def heading_block(text, level=2):
-        """제목 블록 생성"""
-        key = f"heading_{level}"
-        return {
-            "object": "block",
-            "type": key,
-            key: {
-                "rich_text": [{"type": "text", "text": {"content": text}}]
-            }
-        }
-
-    @staticmethod
-    def paragraph_block(text, bold=False, color="default"):
-        """문단 블록 생성"""
-        return {
-            "object": "block",
-            "type": "paragraph",
-            "paragraph": {
-                "rich_text": [{
-                    "type": "text",
-                    "text": {"content": text},
-                    "annotations": {"bold": bold, "color": color}
-                }]
-            }
-        }
-
-    @staticmethod
-    def bulleted_list_block(text):
-        """글머리 기호 목록 블록"""
-        return {
-            "object": "block",
-            "type": "bulleted_list_item",
-            "bulleted_list_item": {
-                "rich_text": [{"type": "text", "text": {"content": text}}]
-            }
-        }
-
-    @staticmethod
-    def callout_block(text, emoji="💡"):
-        """콜아웃 블록"""
-        return {
-            "object": "block",
-            "type": "callout",
-            "callout": {
-                "rich_text": [{"type": "text", "text": {"content": text}}],
-                "icon": {"type": "emoji", "emoji": emoji},
-            }
-        }
-
-    @staticmethod
-    def divider_block():
-        return {"object": "block", "type": "divider", "divider": {}}
-
-    @staticmethod
-    def table_block(rows, has_header=True):
-        """테이블 블록 생성"""
-        table_rows = []
-        for row in rows:
-            cells = []
-            for cell in row:
-                cells.append([{
-                    "type": "text",
-                    "text": {"content": str(cell)}
-                }])
-            table_rows.append({
-                "type": "table_row",
-                "table_row": {"cells": cells}
-            })
-
-        return {
-            "type": "table",
-            "table": {
-                "table_width": len(rows[0]) if rows else 1,
-                "has_column_header": has_header,
-                "has_row_header": False,
-                "children": table_rows,
-            }
-        }
-
-
-# 편의 함수
-def parse_notion_content(page):
-    """Notion 페이지 데이터를 파이썬 딕셔너리로 변환"""
-    props = page["properties"]
-    
-    def get_number(prop_name):
-        p = props.get(prop_name, {})
-        return p.get("number") if p.get("number") is not None else 0
-
-    def get_date(prop_name):
-        p = props.get(prop_name, {})
-        date_obj = p.get("date")
-        return date_obj["start"] if date_obj else None
-
-    def get_select(prop_name):
-        p = props.get(prop_name, {})
-        sel = p.get("select")
-        return sel["name"] if sel else None
-
-    def get_url(prop_name):
-        p = props.get(prop_name, {})
-        return p.get("url")
-
-    def get_checkbox(prop_name):
-        p = props.get(prop_name, {})
-        return p.get("checkbox", False)
-
-    def get_formula_string(prop_name):
-        p = props.get(prop_name, {})
-        formula = p.get("formula", {})
-        return formula.get("string", "")
-
-    return {
-        "page_id": page["id"],
-        "upload_date": get_date("업로드 일"),
-        "route": get_select("경로(계정)"),
-        "content_link": get_url("컨텐츠 링크"),
-        "channel_type": get_select("채널/유형"),
-        "views": get_number("조회수"),
-        "likes": get_number("좋아요"),
-        "saves": get_number("저장"),
-        "comments": get_number("댓글"),
-        "shares": get_number("공유"),
-        "checked": get_checkbox("점검현황"),
-        "engagement": get_formula_string("D+6 참여율 (%)"),
+    # ── 총평 매트릭스 (조회수-참여율 조합 → 액션플랜) ──
+    RATING_ACTION_MAP = {
+        # (조회수등급, 참여율등급): (이모지, 총평명, 액션)
+        ("최상", "최상"): ("👑", "최상-최상 (광고집행!!)", "반응/노출 완벽함. 유료 광고 태워서 매출 극대화."),
+        ("최상", "상"):   ("🔥", "최상-상 (상단고정)", "우리 브랜드를 대표하는 효자 컨텐츠. 프로필 상단 고정."),
+        ("상", "최상"):   ("💎", "상-최상 (구매전환)", "찐팬 반응 폭발. 공구/이벤트 진행 시 전환율 높음."),
+        ("상", "상"):     ("⭐", "상-상 (모범답안)", "우리 브랜드 컨텐츠의 '정석'. 이 톤앤매너 유지."),
+        ("중", "최상"):   ("🔍", "중-최상 (재업로드)", "컨텐츠는 완벽함. 시기만 잘 맞춰서 그대로 재업로드."),
+        ("하", "최상"):   ("🤯", "하-최상 (썸네일교체)", "클릭을 안 해서 못 본 것. 썸네일/제목만 자극적으로 수정 후 재업로드."),
+        ("하", "상"):     ("🎨", "하-상 (포장실패)", "기획 의도는 좋으나 첫인상이 약함. 도입부/커버 보완 필요."),
+        ("최상", "하"):   ("🚨", "최상-하 (내실부족)", "어그로는 성공했으나 알맹이가 없음. 다음 기획 시 내용 보강 필수."),
+        ("상", "하"):     ("📋", "상-하 (이탈원인체크)", "초반 이탈이 높음. 영상 길이가 너무 길거나 지루하지 않은지 점검."),
+        ("중", "하"):     ("💤", "중-하 (지루함)", "임팩트가 약함. 숏폼 호흡을 더 빠르게 가져갈 것."),
+        ("최상", "중"):   ("🎉", "최상-중 (대중성확보)", "반응은 평범하지만 널리 퍼짐. 브랜드 인지도용으로 적합."),
+        ("중", "상"):     ("🌟", "중-상 (매니아층)", "소수지만 확실한 타겟층이 존재함. 소통 강화."),
+        ("상", "중"):     ("🙂", "상-중", "특이사항 없는 평타 컨텐츠."),
+        ("중", "중"):     ("😐", "중-중", "특이사항 없는 평타 컨텐츠."),
+        ("하", "중"):     ("⛏️", "하-중 (개선필요)", "주제 선정부터 다시 고민 필요."),
+        ("하", "하"):     ("🐱", "하-하 (개선시급)", "유입도 반응도 없음. 미련 갖지 말고 빠르게 폐기 후 다음 기획 집중."),
     }
+
+    # ── 채널/유형 매핑 (6가지) ──
+    CHANNEL_TYPES = {
+        "instagram_feed": "인스타그램 피드",
+        "instagram_reels": "인스타그램 릴스",
+        "youtube_long": "유튜브 롱폼",
+        "youtube_shorts": "유튜브 숏츠",
+        "tiktok_feed": "틱톡 피드",
+        "tiktok_reels": "틱톡 릴스",
+    }
+
+    # ── 경로(계정) 매핑 ──
+    ROUTE_MAP = {
+        "official": "빌딘 오피셜",
+        "magazine": "빌딘 매거진",
+    }
+
+    # ── 운영 계정 정보 ──
+    ACCOUNTS = {
+        "instagram_official": "buildin_official",
+        "instagram_magazine": "buildin_mag",
+        "youtube": "@buildin_kr",
+        "tiktok": "buildin_official",
+    }
+
+    @classmethod
+    def validate(cls):
+        """필수 설정값 검증"""
+        required = [
+            ("NOTION_API_TOKEN", cls.NOTION_API_TOKEN),
+            ("NOTION_CONTENT_DB_ID", cls.NOTION_CONTENT_DB_ID),
+        ]
+        missing = [name for name, val in required if not val]
+        if missing:
+            raise ValueError(f"필수 환경변수가 설정되지 않았습니다: {', '.join(missing)}")
+        return True
