@@ -51,6 +51,9 @@ jobs:
           INSTAGRAM_MAGAZINE_ACCOUNT_ID: ${{ secrets.INSTAGRAM_MAGAZINE_ACCOUNT_ID }}
           YOUTUBE_API_KEY: ${{ secrets.YOUTUBE_API_KEY }}
           YOUTUBE_CHANNEL_ID: ${{ secrets.YOUTUBE_CHANNEL_ID }}
+          YOUTUBE_OAUTH_CLIENT_ID: ${{ secrets.YOUTUBE_OAUTH_CLIENT_ID }}
+          YOUTUBE_OAUTH_CLIENT_SECRET: ${{ secrets.YOUTUBE_OAUTH_CLIENT_SECRET }}
+          YOUTUBE_OAUTH_REFRESH_TOKEN: ${{ secrets.YOUTUBE_OAUTH_REFRESH_TOKEN }}
         run: |
           # 수동 실행이면 입력값 사용, 스케줄이면 요일에 따라 결정
           if [ -n "${{ github.event.inputs.command }}" ]; then
